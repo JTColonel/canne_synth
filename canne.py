@@ -103,7 +103,7 @@ class ANNeSynth:
 
 	def loadDataSet(self):
 		#Loading 95,443 Magnitude STFT frames saved as .npy (Loading in data)
-		filename = 'all_frames.npy'	#Static Data used for training net
+		filename = 'synth_frames.npy'	#Static Data used for training net
 		data_path = os.path.join(os.getcwd(),filename)
 		self.frames = np.load(data_path)
 		self.frames = np.asarray(self.frames)
