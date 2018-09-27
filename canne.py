@@ -10,6 +10,7 @@ import sys
 import scipy as sci
 import soundfile as sf
 from time import time
+from tqdm import tqdm
 
 def do_rtpghi_gaussian_window(mag,len_window,hop_length_):
 	threshold = 1e-3
@@ -51,10 +52,10 @@ class Topology:
 		##Constant Values belonging to topology:
 		self.chkpt_name = 'checkpoints'
 		self.min_HL = 8
-		self.epochs = 300 #Number of epochs the ANN is trained for - 300 should be sufficient
+		self.epochs = 50 #Number of epochs the ANN is trained for - 300 should be sufficient
 		self.learning_rate_adam = 1e-3 #ADAM learning rate - 1e-3 was found to produce robust ANNs
-		self.l2_lamduh = 1e-16 #Lamda value for L1 Regularization
-		self.batch_size = 200 #Typical batch size for ADAM useage
+		self.l2_lamduh = 1e-10 #Lamda value for L1 Regularization
+		self.batch_size = 100 #Typical batch size for ADAM useage
 		self.fc = [1000,512,256,128,64,32,16,8,16,32,64,128,256,512,1024]
 		
 		for i in range(15):
@@ -103,7 +104,8 @@ class ANNeSynth:
 
 	def loadDataSet(self):
 		#Loading 95,443 Magnitude STFT frames saved as .npy (Loading in data)
-		filename = 'synth_frames.npy'	#Static Data used for training net
+		filename = 'all_frames.npy'	#5 Octave Static Data used for training net
+		# filename = 'oo_all_frames.npy' #One Octave set
 		data_path = os.path.join(os.getcwd(),filename)
 		self.frames = np.load(data_path)
 		self.frames = np.asarray(self.frames)
@@ -117,10 +119,15 @@ class ANNeSynth:
 		second_diff = np.diff(self.frames, n=2)
 		#self.frames = np.hstack((self.frames,first_diff))
 		#self.frames = np.hstack((self.frames, second_diff))
-		#self.frames = np.hstack((self.frames,mfcc_append))
+		# self.frames = np.hstack((self.frames,mfcc_append))
 		#self.frames = np.hstack((self.frames,mel_append))
 		print(np.shape(self.frames))
+
+		#Five Octave Dataset
 		self.validate = self.frames[84712:,:]
+		#One Octave Dataset
+		# self.validate = self.frames[17998:,:]
+		
 		self.topology = Topology(np.shape(self.frames)[1])
 
 	def recurseThroughLayer(self,layer,i,desired_stop):
@@ -148,9 +155,14 @@ class ANNeSynth:
 
 	def trainNeuralNetwork(self):
 		#Splitting self.frames into different buffers
+		#Five Octave Dataset
 		train = self.frames[:78991,:]
 		test = self.frames[78991:84712,:]
 		validate = self.frames[84712:,:]
+		#One Octave Dataset
+		# train = self.frames[:16685,:]
+		# test = self.frames[16685:17998,:]
+		# validate = self.frames[17998:,:]
 		
 		#Generating Parameters for the Neural Network and Initializing the Net
 		total_batches = int(len(train)/self.topology.batch_size) #Number of batches per epoch
@@ -181,7 +193,7 @@ class ANNeSynth:
 				batch = frames[_*self.topology.batch_size:_*self.topology.batch_size+self.topology.batch_size] #Generates batch of size batch_size for training
 				self._sess.run(train_step, feed_dict={self.x_:batch, self.y_:batch[:,0:self.topology.output_size]})
 			tes = np.reshape(test[:,:],[-1,self.topology.input_size]) #Reshaping test array to fit with TF 
-			if i%10 == 9:
+			if i%10 == 1:
 				self.saver.save(self._sess, self.topology.chkpt_name+'/my-model', global_step=i)
 				temp_value = self._sess.run(self.loss2, feed_dict={self.x_:tes, self.y_:test[:,0:self.topology.output_size]})
 				text_file.write('\n%g'% i)
@@ -216,12 +228,14 @@ class ANNeSynth:
 			plt.clf()
 			print('Plotting Finished')
 
-	def execute(self,values):
+	def execute(self,values,filename='long'):
 		self.saver = tf.train.Saver()
 		if not self._operationMode.train:
 			ckpt = tf.train.latest_checkpoint(self.topology.chkpt_name) 
 			self.saver.restore(self._sess, ckpt)
 		else:
+			self.saver = tf.train.Saver()
+			print('hi')
 			self.trainNeuralNetwork()
 
 		#Prints validation accuracy of the trained ANN
@@ -232,34 +246,56 @@ class ANNeSynth:
 		if self._operationMode.control:
 			len_window = 4096 #Specified length of analysis window
 			hop_length = 1024 #Specified percentage hop length between windows
-			threshold = 1e-4
-			pie = np.pi
-			relative_height = 0.01
-			width_ = (len_window/2)/np.sqrt(-2*np.log(relative_height))
-			gaussian_window = sci.signal.get_window(('gaussian',width_),len_window)
-			
 			t = time()
-			seed_ = np.random.randint(1, high=2000)
-			n_frames = 250
+			n_frames = 750
 			mag_buffer = np.zeros((self.topology.output_size,1))
-			np.random.seed(seed_)
 			activations = values[:,0:8]
 			print(values)
 			for ii in range(n_frames):
 				orig_hat = np.reshape(self._sess.run(self.outputLayer2,feed_dict={self.controller:activations}),[self.topology.output_size,-1])
-				mag_buffer = np.hstack((mag_buffer,orig_hat))
-			
+				mag_buffer = np.hstack((mag_buffer,orig_hat))		
 			mag_buffer = 50*mag_buffer#*np.random.uniform(low=0.999, high=1.001, size=np.shape(mag_buffer))#+np.random.uniform(low=1,high=20,size=np.shape(mag_buffer))
 			bass_boost = (np.exp(np.linspace(0.95,-0.95,self.topology.output_size)))
 			for ii in range(n_frames):
 				mag_buffer[:,ii] = np.roll(mag_buffer[:,ii],int(values[:,8]))*bass_boost
-
-
 			T = do_rtpghi_gaussian_window(mag_buffer, len_window,hop_length) #Initializes phase
 			T = 0.8*T/np.max(np.abs(T))
-			#T_out = griffinlim_gaussian(mag_buffer,window=gaussian_window,n_fft=len_window,n_iter=15) #refines phase for n iterations
-			#librosa.output.write_wav(os.path.join(os.getcwd(),'function_test.wav'),T,sr=44100) #Write output
-			sf.write('function_test.wav', T, 44100, subtype='PCM_16')  #Must be 16bit PCM to work with pygame
+			crossfade_time = 0.35
+			crossfade_time = int(crossfade_time*44100)
+			fade_in = np.log(np.linspace(1,2.71,crossfade_time))
+			fade_out = np.log(np.linspace(2.71,1,crossfade_time))
+			T[:crossfade_time] = fade_in*T[:crossfade_time]+fade_out*T[len(T)-crossfade_time:]
+			U = T[:len(T)-crossfade_time]
+			sf.write(filename+'.wav', U, 44100, subtype='PCM_16')  #Must be 16bit PCM to work with pygame
 			elapsed = time() - t
 			print('Method took '+str(elapsed)+' seconds to process the whole file')
-			print('The whole file is '+str(len(T)/44100)+' seconds long')
+			print('The whole file is '+str(len(U)/44100)+' seconds long')
+
+	def load_weights_into_memory(self):
+		self.saver = tf.train.Saver()
+		ckpt = tf.train.latest_checkpoint(self.topology.chkpt_name)
+		self.saver.restore(self._sess, ckpt)
+
+	def play_synth(self,values):
+		len_window = 4096 #Specified length of analysis window
+		hop_length = 1024 #Specified percentage hop length between windows
+		n_frames = 200
+		mag_buffer = np.zeros((self.topology.output_size,1))
+		activations = values[:,0:8]
+		for ii in range(n_frames):
+			orig_hat = np.reshape(self._sess.run(self.outputLayer2,feed_dict={self.controller:activations}),[self.topology.output_size,-1])
+			mag_buffer = np.hstack((mag_buffer,orig_hat))		
+		mag_buffer = 50*mag_buffer#*np.random.uniform(low=0.999, high=1.001, size=np.shape(mag_buffer))#+np.random.uniform(low=1,high=20,size=np.shape(mag_buffer))
+		bass_boost = (np.exp(np.linspace(0.95,-0.95,self.topology.output_size)))
+		for ii in range(n_frames):
+			mag_buffer[:,ii] = np.roll(mag_buffer[:,ii],int(values[:,8]))*bass_boost
+		T = do_rtpghi_gaussian_window(mag_buffer, len_window,hop_length) #Initializes phase
+		T = 0.8*T/np.max(np.abs(T))
+		crossfade_time = 0.4
+		crossfade_time = int(crossfade_time*44100)
+		fade_in = np.log(np.linspace(1,2.71,crossfade_time))
+		fade_out = np.log(np.linspace(2.71,1,crossfade_time))
+		T[:crossfade_time] = fade_in*T[:crossfade_time]+fade_out*T[len(T)-crossfade_time:]
+		U = T[:len(T)-crossfade_time]
+		sf.write('loop.wav', U, 44100, subtype='PCM_16')  #Must be 16bit PCM to work with pygame
+

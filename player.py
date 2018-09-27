@@ -15,11 +15,11 @@ class sliderGui(QWidget):
 		layout = QVBoxLayout()
 		layout2 = QHBoxLayout()
 		
-		self.generateButton = QtGui.QPushButton('Generate', self)
+		self.generateButton = QtGui.QPushButton('Save', self)
 		self.generateButton.clicked.connect(self.generate)
 		
-		self.playButton = QtGui.QPushButton('Play',self)
-		self.playButton.clicked.connect(self.play)
+		self.playButton = QtGui.QPushButton('Pause',self)
+		self.playButton.clicked.connect(self.pause)
 
 		layout = QtGui.QVBoxLayout(self)
 		layout.addWidget(self.playButton)
@@ -45,14 +45,14 @@ class sliderGui(QWidget):
 		self.addSlider(self.s7,layout2)
 		self.addSlider(self.s8,layout2)
 		self.addSlider(self.s9,layout2)
-		self.s9.setMinimum(-50)
-		self.s9.setMaximum(50)
+		self.s9.setMinimum(-30)
+		self.s9.setMaximum(30)
 		self.s9.setValue(0)
-		self.s9.setTickInterval(2)
+		self.s9.setTickInterval(3)
 
 		self.setLayout(layout)
-		self.setWindowTitle("Foley Tool")
-	
+		self.setWindowTitle("CANNe")
+
 	def addSlider(self,slider,layout):
 		slider.setMinimum(0)
 		slider.setMaximum(40)
@@ -60,14 +60,27 @@ class sliderGui(QWidget):
 		slider.setTickPosition(QSlider.TicksBelow)
 		slider.setTickInterval(2)
 		layout.addWidget(slider)
-		slider.valueChanged.connect(self.valuechange)		
+		slider.sliderReleased.connect(self.valuechange)		
 
 	def valuechange(self):
-		print('-')
+		tmp = np.zeros((1,9))
+		tmp[0,0] = self.s1.value()
+		tmp[0,1] = self.s2.value()
+		tmp[0,2] = self.s3.value()
+		tmp[0,3] = self.s4.value()
+		tmp[0,4] = self.s5.value()
+		tmp[0,5] = self.s6.value()
+		tmp[0,6] = self.s7.value()
+		tmp[0,7] = self.s8.value()
+		tmp /= 10.
+		tmp[0,8] = 2*self.s9.value()
+		synth.play_synth(tmp)
+		pygame.mixer.music.load('loop.wav')
+		pygame.mixer.music.play(-1)
+
 
 	def generate(self):
 		tmp = np.zeros((1,9))
-		
 		tmp[0,0] = self.s1.value()
 		tmp[0,1] = self.s2.value()
 		tmp[0,2] = self.s3.value()
@@ -78,20 +91,21 @@ class sliderGui(QWidget):
 		tmp[0,7] = self.s8.value()
 		tmp /= 10.
 		tmp[0,8] = self.s9.value()
-		#synth.execute_filter(tmp,'neko.wav')
-		synth.execute(tmp)
+		text, ok = QInputDialog.getText(self, 'Save File', 'Enter filename:')
+		if ok:
+			filename_=str(text)
+			synth.execute(tmp,filename_)
 
-	def play(self):
-		#os.system('aplay function_test.wav')
-		pygame.mixer.music.load('function_test.wav')
-		pygame.mixer.music.play(-1)
-		print('Loaded')
-		#pygame.mixer.Sound.play
+		
+
+	def pause(self):
+		pygame.mixer.music.stop()
+
 
 def main():
-	#pygame.mixer.pre_init(frequency=44100, size=-16, channels=1)
+	synth.load_weights_into_memory()
 	pygame.init()
-	pygame.mixer.init()
+	pygame.mixer.init(channels=1)
 	app = QApplication(sys.argv)
 	ex = sliderGui()
 	ex.show()
